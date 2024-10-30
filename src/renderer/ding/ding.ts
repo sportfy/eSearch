@@ -7,13 +7,13 @@ import { getImgUrl, initStyle } from "../root/root";
 import store from "../../../lib/store/renderStore";
 import xtranslator from "xtranslator";
 import {
+    addClass,
     button,
     ele,
     elFromId,
     type ElType,
-    frame,
     image,
-    input,
+    trackPoint,
     txt,
     view,
 } from "dkh-ui";
@@ -111,38 +111,68 @@ const setNewDing = (
     div.el.onmouseleave = () => {
         toolBarC.el.style.transform = "translateY(-105%)";
     };
-    // 透明
-    const opacityEl = frame("opacity", {
-        _: view().attr({ id: "opacity" }),
-        icon: view().class("opacity").add(iconEl("opacity")),
-        input: input("range")
-            .attr({ id: "透明度", min: "0", max: "100" })
-            .on("input", (_, el) => {
-                opacityElP.sv(el.gv);
-            }),
-        p: txt()
-            .attr({ id: "透明度_p" })
-            .bindSet((v: string, el) => {
-                el.innerText = `${v}%`;
-            }),
-    });
 
-    const opacityElP = opacityEl.el
-        .bindSet((v: string) => {
+    const concorlClass = addClass(
+        {
+            cursor: "ew-resize",
+        },
+        {
+            "& .icon": {
+                width: "32px",
+                position: "initial",
+            },
+        },
+    );
+
+    // 透明
+    const opacityEl = txt()
+        .bindSet((v: string, el) => {
+            el.innerText = `${v}%`;
             img.el.style.opacity = `${Number(v) / 100}`;
-            opacityEl.els.input.sv(v);
-            opacityEl.els.p.sv(v);
         })
         .sv("100");
+    const opacityElP = view("x")
+        .class(concorlClass)
+        .add([iconEl("opacity"), opacityEl]);
+
+    trackPoint(opacityElP, {
+        start: () => {
+            // todo keep toolbar show
+            return { x: 0, y: 0, data: Number.parseInt(opacityEl.gv) };
+        },
+        ing: (p, _e, { startData }) => {
+            const d = Math.round(p.x / 2);
+            const newOp = Math.max(0, Math.min(100, startData + d));
+            opacityEl.sv(newOp.toString());
+        },
+    });
+
     toolBarC.add(opacityElP);
     // 大小
-    const sizeEl = view()
-        .attr({ id: "window_size" })
-        .add(view().class("size").add(iconEl("size")));
-    const sizeInput = input("number")
-        .on("blur", sizeChange)
-        .on("change", sizeChange)
+    const sizeInput = txt()
+        .bindSet((v: string, el) => {
+            el.innerText = `${v}%`;
+        })
+        .bindGet((el) => {
+            return Number.parseInt(el.innerText);
+        })
         .sv("100");
+    const sizeEl = view("x")
+        .class(concorlClass)
+        .add([iconEl("size"), sizeInput]);
+
+    trackPoint(sizeEl, {
+        start: () => {
+            // todo keep toolbar show
+            return { x: 0, y: 0, data: sizeInput.gv };
+        },
+        ing: (p, _e, { startData }) => {
+            const d = Math.round(p.x / 2);
+            const newS = Math.max(0, startData + d);
+            sizeInput.sv(newS.toString());
+            sizeChange();
+        },
+    });
 
     function sizeChange() {
         if (Number.isFinite(Number(sizeInput.gv))) {
@@ -154,9 +184,7 @@ const setNewDing = (
         }
     }
 
-    toolBarC.add(
-        sizeEl.add(ele("span").attr({ id: "size" }).add([sizeInput, "%"])),
-    );
+    toolBarC.add(sizeEl);
 
     // 滚轮缩放
     div.el.onwheel = (e) => {
@@ -222,6 +250,7 @@ const setNewDing = (
     };
     // 快捷键
     div.on("keydown", (e) => {
+        if ((e.target as HTMLElement).tagName === "INPUT") return;
         if (e.key === "Escape") {
             close(wid);
         }
@@ -257,7 +286,7 @@ const setNewDing = (
     }
 
     return {
-        opacity: (v: string) => opacityElP.sv(v),
+        opacity: (v: string) => opacityEl.sv(v),
         size: (v: string) => sizeInput.sv(v),
         id: wid,
     };
@@ -534,7 +563,7 @@ type start = {
     y: number;
     dx: number;
     dy: number;
-    d: string;
+    d: Dire;
 };
 
 type Resize = {
@@ -583,9 +612,11 @@ function mouseMove(el: HTMLElement, x: number, y: number) {
         move(windowDiv, { x, y });
     } else {
         const div = dives.find((d) => d.el.contains(el));
-        if (div && (el.id === "tool_bar_c" || el.tagName === "IMG")) {
+        if (div) {
             const d = dire(div.el, { x, y });
             cursor(d);
+        } else {
+            cursor("");
         }
     }
 }
@@ -601,53 +632,77 @@ function mouseEnd() {
     cursor(direction);
 }
 
-let direction = "";
-function dire(el: HTMLElement, e: { x: number; y: number }) {
+type Dire =
+    | "move"
+    | "西北"
+    | "东南"
+    | "东北"
+    | "西南"
+    | "西"
+    | "东"
+    | "北"
+    | "南"
+    | "";
+
+let direction: Dire = "";
+
+function dire(el: HTMLElement, p: { x: number; y: number }) {
     const width = el.offsetWidth;
     const height = el.offsetHeight;
-    const pX = e.x - el.offsetLeft;
-    const pY = e.y - el.offsetTop;
-    let direction = "";
+    const pX = p.x - el.offsetLeft;
+    const pY = p.y - el.offsetTop;
+    let direction: Dire = "";
 
     const num = 8;
-    // 光标样式
-    switch (true) {
-        case pX <= num && pY <= num:
+
+    function w() {
+        return 0 <= pX && pX <= num;
+    }
+
+    function e() {
+        return width - num <= pX && pX <= width;
+    }
+
+    function n() {
+        return 0 <= pY && pY <= num;
+    }
+
+    function s() {
+        return height - num <= pY && pY <= height;
+    }
+
+    if (0 <= pX && pX <= width && 0 <= pY && pY <= height) {
+        if (w() && n()) {
             direction = "西北";
-            break;
-        case pX >= width - num && pY >= height - num:
-            direction = "东南";
-            break;
-        case pX >= width - num && pY <= num:
-            direction = "东北";
-            break;
-        case pX <= num && pY >= height - num:
+        } else if (w() && s()) {
             direction = "西南";
-            break;
-        case pX <= num:
+        } else if (e() && n()) {
+            direction = "东北";
+        } else if (e() && s()) {
+            direction = "东南";
+        } else if (w()) {
             direction = "西";
-            break;
-        case pX >= width - num:
+        } else if (e()) {
             direction = "东";
-            break;
-        case pY <= num:
+        } else if (n()) {
             direction = "北";
-            break;
-        case pY >= height - num:
+        } else if (s()) {
             direction = "南";
-            break;
-        case num < pX && pX < width - num && num < pY && pY < height - num:
+        } else {
             direction = "move";
-            break;
-        default:
-            direction = "";
-            break;
+        }
+    } else {
+        direction = "";
     }
     return direction;
 }
 
-function cursor(d: string) {
-    const m = {
+let lastCursor: Dire = "";
+
+function cursor(d: Dire) {
+    if (d === lastCursor) return;
+    lastCursor = d;
+    const m: Record<Dire, string> = {
         西北: "nwse-resize",
         东南: "nwse-resize",
         东北: "nesw-resize",
